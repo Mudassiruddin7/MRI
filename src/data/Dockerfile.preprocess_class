@@ -1,0 +1,12 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+
+COPY src/data/requirements.preprocess_class.txt requirements.txt
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY src/data/preprocess_corrections.py ./preprocess_corrections.py
+
+ENTRYPOINT ["python", "preprocess_corrections.py"]

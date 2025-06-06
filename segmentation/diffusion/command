@@ -1,0 +1,59 @@
+# --- Define Variables ---
+python3 setup.py sdist --formats=gztar
+gsutil cp dist/conditional_diffusion_mri_trainer-0.1.tar.gz gs://discai-450508-packages/conditional_diffusion_mri_trainer-0.1.tar.gz
+export PROJECT_ID="discai-450508"
+export REGION="us-central1"
+export JOB_NAME="conditional_diffusion_mri_train_$(date +%Y%m%d_%H%M%S)"
+
+
+export BUCKET_DATA="/gcs/discai-450508-processed-data"
+
+export PACKAGE_GCS_URI="gs://discai-450508-packages/conditional_diffusion_mri_trainer-0.1.tar.gz"
+export TFRECORD_GCS_PATH="${BUCKET_DATA}/tfrecords"
+export CHECKPOINT_GCS_PATH="/gcs/discai-450508-packages/${JOB_NAME}/"
+export OUTPUT_GCS_PATH="/gcs/discai-450508-packages/${JOB_NAME}/samples/"
+
+export PYTHON_MODULE="trainer.main"
+export CONTAINER_IMAGE_URI="us-docker.pkg.dev/vertex-ai/training/tf-gpu.2-17.py310:latest"
+
+# --- Compute Resources ---
+export MACHINE_TYPE="a2-highgpu-1g"
+export ACCELERATOR_TYPE="NVIDIA_TESLA_A100"
+export ACCELERATOR_COUNT=1
+
+# --- Training Hyperparameters ---
+export EPOCHS=100
+export BATCH_SIZE=4 
+export LEARNING_RATE=1e-4
+
+# --- Model Architecture Hyperparameters ---
+export BASE_CHANNELS=128
+export NUM_DOWN_BLOCKS=6
+export TIME_EMB_DIM=128
+
+# --- Submit Job ---
+echo "Submitting job: ${JOB_NAME}"
+echo "Package: ${PACKAGE_GCS_URI}"
+echo "Data Path: ${TFRECORD_GCS_PATH}"
+echo "Checkpoint Dir: ${CHECKPOINT_GCS_PATH}"
+echo "Output Dir (for sampling): ${OUTPUT_GCS_PATH}" #
+
+gcloud ai custom-jobs create \
+  --project=$PROJECT_ID \
+  --region=$REGION \
+  --display-name=$JOB_NAME \
+  --worker-pool-spec=machine-type=$MACHINE_TYPE,replica-count=1,accelerator-type=$ACCELERATOR_TYPE,accelerator-count=$ACCELERATOR_COUNT,executor-image-uri=$CONTAINER_IMAGE_URI,python-module=$PYTHON_MODULE \
+  --python-package-uris=$PACKAGE_GCS_URI \
+  --args="--mode=sample" \
+  --args="--tfrecord_dir=$TFRECORD_GCS_PATH" \
+  --args="--checkpoint_dir=$CHECKPOINT_GCS_PATH" \
+  --args="--output_dir=$OUTPUT_GCS_PATH" \
+  --args="--epochs=$EPOCHS" \
+  --args="--batch_size=$BATCH_SIZE" \
+  --args="--lr=$LEARNING_RATE" \
+  --args="--base_channels=$BASE_CHANNELS" \
+  --args="--num_down_blocks=$NUM_DOWN_BLOCKS" \
+  --args="--time_emb_dim=$TIME_EMB_DIM" \
+  --args="--num_samples=1" \
+  --args="--load_weights=gs://discai-450508-packages/conditional_diffusion_mri_train_20250428_191732/unet_epoch_100.weights.h5"
+echo "Job submitted. Check status and logs..."

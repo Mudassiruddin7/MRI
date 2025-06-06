@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload MRI Image/Sequence</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles if needed */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-out forwards;
+        }
+        /* Add a simple spinner */
+        .loader {
+            border: 4px solid #f3f3f3; /* Light grey */
+            border-top: 4px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto; /* Center the loader */
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Hide loader initially */
+        #loadingIndicator {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans p-6 md:p-10">
+
+    <div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-md">
+        <h1 class="text-3xl font-bold text-gray-800 mb-4 text-center">Upload MRI Scan</h1>
+        <p class="text-gray-600 mb-6 text-center">
+            Select a single MHA file or a sequence of multiple PNG/JPG image slices for analysis.
+        </p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="mb-4 fade-in">
+              {% for category, message in messages %}
+                <div class="p-4 rounded-md {% if category == 'error' %} bg-red-100 text-red-700 {% elif category == 'success' %} bg-green-100 text-green-700 {% else %} bg-blue-100 text-blue-700 {% endif %}" role="alert">
+                  {{ message }}
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <form id="uploadForm" method="POST" action="/upload" enctype="multipart/form-data" class="space-y-6">
+            <div>
+                <label for="fileInput" class="block text-sm font-medium text-gray-700 mb-2">Choose file(s):</label>
+                <input
+                    type="file"
+                    name="file"
+                    id="fileInput"
+                    multiple
+                    required
+                    class="block w-full text-sm text-gray-500
+                           file:mr-4 file:py-2 file:px-4
+                           file:rounded-full file:border-0
+                           file:text-sm file:font-semibold
+                           file:bg-blue-50 file:text-blue-700
+                           hover:file:bg-blue-100"
+                >
+            </div>
+
+            <div>
+                <button
+                    type="submit"
+                    id="submitButton"
+                    class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition duration-150 ease-in-out"
+                >
+                    Upload and Process
+                </button>
+            </div>
+        </form>
+
+        <div id="loadingIndicator" class="mt-6 text-center">
+            <div class="loader"></div>
+            <p class="text-gray-600">Processing your upload, please wait...</p>
+        </div>
+
+    </div>
+
+    <script>
+        // show loading indicator on form submit
+        const form = document.getElementById('uploadForm');
+        const submitButton = document.getElementById('submitButton');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+
+        form.addEventListener('submit', function() {
+            // disable button to prevent multiple submissions
+            submitButton.disabled = true;
+            submitButton.innerText = 'Processing...';
+            submitButton.classList.add('opacity-50', 'cursor-not-allowed');
+            // show spinner
+            loadingIndicator.style.display = 'block';
+        });
+    </script>
+
+</body>
+</html>

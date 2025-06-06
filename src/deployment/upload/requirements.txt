@@ -1,0 +1,6 @@
+Flask
+gunicorn
+google-cloud-storage
+requests
+google-auth 
+pillow

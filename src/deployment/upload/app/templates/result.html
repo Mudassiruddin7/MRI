@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prediction Result & Correction</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@recogito/annotorious@latest/dist/annotorious.min.css">
+
+    <style>
+        /* --- Base Styling --- */
+        body { font-family: sans-serif; padding: 20px; background-color: #f3f4f6; }
+        code { background-color: #eee; padding: 2px 5px; border-radius: 3px; }
+        .results-section { margin-top: 15px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background-color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        ul { list-style: none; padding-left: 0; }
+        li { margin-bottom: 5px; }
+        .image-container { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 15px; }
+        .image-wrapper { flex: 1; min-width: 300px; text-align: center; padding: 10px; background-color: #f9fafb; border-radius: 0.5rem; border: 1px solid #e5e7eb; position: relative; /* Needed for positioning labels/selects */ }
+        #overlay-image { display: block; max-width: 100%; height: auto; margin: 5px auto; border: 1px solid #d1d5db; border-radius: 0.375rem; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06); cursor: crosshair; }
+        .result-image { max-width: 100%; height: auto; max-height: 450px; border: 1px solid #d1d5db; border-radius: 0.375rem; margin: 5px auto; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06); display: block; }
+        .caption { font-weight: 600; margin-top: 5px; font-size: 0.9em; color: #4b5563; }
+        .gcs-uri { font-size: 0.75rem; color: #6b7280; word-break: break-all; }
+
+        /* --- Annotorious & Custom Elements Styling --- */
+        .a9s-annotationlayer .a9s-selection .a9s-inner { stroke: #ff0000 !important; stroke-width: 2px !important;}
+        .a9s-toolbar { position: absolute; top: 10px; left: 10px; z-index: 1000; background: rgba(255,255,255,0.8); padding: 5px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+
+        /* Sticky label div */
+        .annotation-label {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #333;
+            border-radius: 3px;
+            padding: 2px 6px;
+            font-size: 0.85em;
+            font-weight: bold;
+            white-space: nowrap;
+            pointer-events: none; /* Important */
+            z-index: 10; /* Below toolbar/select */
+            transform: translateY(-100%); /* Position above top-left corner */
+            margin-top: -2px; /* Small gap */
+            color: #333;
+        }
+
+        /* Dropdown select */
+        .label-select {
+            position: absolute;
+            z-index: 9999; /* Above everything */
+            background-color: white;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 5px;
+            font-size: 0.9em;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans p-6 md:p-10">
+
+    <div class="max-w-5xl mx-auto bg-white p-8 rounded-lg shadow-lg">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6 text-center">Prediction Result</h1>
+         <div class="results-section bg-blue-50 p-4 rounded-lg mb-6">
+             <h2 class="text-lg font-semibold text-blue-800 mb-2">Request Information</h2>
+             <ul><li><strong>Request ID:</strong> <code id="request-id" class="text-sm bg-blue-100 text-blue-900 px-2 py-1 rounded">{{ request_id }}</code></li><li><strong>Processed Input:</strong> <code class="text-sm bg-blue-100 text-blue-900 px-2 py-1 rounded">{{ input_uri_info }}</code></li></ul>
+         </div>
+
+        {#  image results section  #}
+        <div class="results-section mb-6">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Visualizations & Correction</h2>
+            <p class="text-sm text-gray-600 mb-4">Review the detected discs below. Use the rectangle tool (toolbar appears on hover/top-left) to adjust, delete, or add boxes. Click an existing box or finish drawing a new box to select a label from the dropdown.</p>
+            <div class="image-container">
+                {# overlay image (the one we annotate) #}
+                <div id="image-wrapper" class="image-wrapper relative"> {% if overlay_signed_url %}
+                        <img id="overlay-image" src="{{ overlay_signed_url }}" alt="Input with Detections" >
+                        <div class="caption">Input with Detections (Editable)</div>
+                        <div class="gcs-uri">(GCS: <code>{{ overlay_uri }}</code>)</div>
+                    {% else %}
+                        <p class="text-gray-500 italic mt-4">Overlay image preview not available for annotation.</p>
+                        {% if overlay_uri %} <div class="gcs-uri mt-2">(GCS: <code>{{ overlay_uri }}</code>)</div> {% endif %}
+                    {% endif %}
+                </div>
+                {# mask image (just for display) #}
+                 <div class="image-wrapper">
+                    {% if mask_signed_url %}
+                        <img src="{{ mask_signed_url }}" alt="Segmentation Mask" class="result-image">
+                         <div class="caption">Segmentation Mask</div>
+                         <div class="gcs-uri">(GCS: <code>{{ mask_uri }}</code>)</div>
+                    {% else %}
+                        <p class="text-gray-500 italic mt-4">Mask image preview not available.</p>
+                         {% if mask_uri %} <div class="gcs-uri mt-2">(GCS: <code>{{ mask_uri }}</code>)</div> {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+            {#  save button  #}
+            <div class="mt-6 text-center">
+                 <button id="saveButton" class="px-6 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">Save Labeled Corrections</button>
+                <p id="saveStatus" class="text-sm text-gray-500 mt-2 h-4"></p>
+            </div>
+            <div class="flex flex-col items-center">
+                <button id="acceptPredictionsButton" class="w-full sm:w-auto px-6 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-sky-600 hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 transition duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">Accept Model Predictions</button>
+                <p id="acceptStatus" class="text-sm text-gray-500 mt-2 h-4 w-full text-center"></p>
+             </div>
+
+        </div>
+        {#  end image results section  #}
+
+        {#  classification results section (display only)  #}
+        {% if classification_results is defined and classification_results is not none %}
+        <div class="results-section mb-6">
+             <h2 class="text-xl font-semibold text-gray-700 mb-3">Initial Classification Scores</h2>
+             {% if classification_results|length > 0 %}
+                <p class="text-sm text-gray-600 mb-4">Initial scores for initially detected discs (for reference only):</p>
+                <ul class="space-y-2">
+                    {% for score in classification_results %}
+                        <li class="flex justify-between items-center bg-gray-50 p-3 rounded-md border border-gray-200">
+                            <span class="font-medium text-gray-700">Initial Disc {{ loop.index }}:</span>
+                            <code class="text-sm font-mono {% if score is number and score > 0.5 %} text-red-600 bg-red-100 {% elif score is number %} text-green-600 bg-green-100 {% else %} text-gray-500 bg-gray-100 {% endif %} px-2 py-1 rounded">{{ "%.4f"|format(score) if score is number else "N/A" }}</code>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %} <p class="text-gray-500 italic">No discs were initially detected by the segmentation model.</p> {% endif %}
+        </div>
+        {% endif %}
+        {#  end classification results section  #}
+
+        <div class="mt-8 text-center"><a href="/" class="inline-flex items-center px-6 py-3 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">Upload Another Scan</a></div>
+    </div>
+
+
+    <script src="https://cdn.jsdelivr.net/npm/@recogito/annotorious@latest/dist/annotorious.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@recogito/annotorious-selector-pack@latest/dist/annotorious-selector-pack.min.js"></script>
+    <script>
+        //  embed data passed from flask 
+        const RELEVANT_CLASS_NAMES = {{ class_names | tojson }};
+        const initialBoxes = {{ bounding_boxes | tojson }};
+        const requestId = {{ request_id | tojson }};
+        const classificationScores = {{ classification_results | tojson }};
+
+        //  annotorious setup 
+        let anno = null; // annotorious instance
+
+        //  dom elements 
+        const overlayImage = document.getElementById('overlay-image');
+        const imageWrapper = document.getElementById('image-wrapper'); // get the wrapper
+        const saveButton = document.getElementById('saveButton');
+        const saveStatus = document.getElementById('saveStatus');
+        const acceptPredictionsButton = document.getElementById('acceptPredictionsButton');
+        const acceptStatus = document.getElementById('acceptStatus');
+
+        
+        //helper to get current label from annotation body.
+         
+        function getCurrentLabel(annotation) {
+            if (annotation?.body?.length > 0) {
+                // prioritize body with purpose 'tagging'
+                const tagBody = annotation.body.find(b => b.purpose === 'tagging');
+                if (tagBody && typeof tagBody.value === 'string') {
+                    return tagBody.value;
+                }
+                // fallback check if any body has a value that's a known class name
+                const fallbackBody = annotation.body.find(b => typeof b.value === 'string' && RELEVANT_CLASS_NAMES.includes(b.value));
+                if(fallbackBody) return fallbackBody.value;
+            }
+            return null; // no label found
+        }
+
+       
+        //helper to get bbox {x, y, w, h} from annotation selector (rect only)
+        
+        function getPixelBBox(annotation) {
+             const selector = annotation?.target?.selector;
+             if (selector && selector.type === 'FragmentSelector' && selector.value?.startsWith('xywh=pixel:')) {
+                 const coords = selector.value.split(':')[1].split(',').map(Number);
+                 if (coords.length === 4 && coords.every(n => !isNaN(n))) {
+                     const [x, y, w, h] = coords.map(Math.round);
+                     return { x, y, w, h };
+                 }
+             }
+             console.warn("Could not parse bbox for:", annotation);
+             return null;
+        }
+
+         
+        //remove any existing dropdown from the image wrapper
+         function removeDropdown() {
+             const existingSelect = imageWrapper?.querySelector('.label-select');
+             if (existingSelect) {
+                 existingSelect.remove();
+             }
+         }
+
+    
+        // create and show label selection dropdown for a given annotation
+
+         function showLabelDropdown(annotation) {
+             removeDropdown(); // remove previous dropdown first
+             if (!annotation || !imageWrapper) return;
+
+             const bbox = getPixelBBox(annotation);
+             if (!bbox) return; // cannot position without bbox
+
+             const currentLabel = getCurrentLabel(annotation);
+
+             // create select element
+             const select = document.createElement('select');
+             select.className = 'label-select';
+             select.style.left = bbox.x + 'px';
+             select.style.top = (bbox.y + 5) + 'px'; // position slightly below top-left
+
+             // add placeholder
+             const ph = new Option('Select label...', '');
+             select.add(ph);
+
+             // add options from class names
+             RELEVANT_CLASS_NAMES.forEach(name => {
+                 const option = new Option(name, name);
+                 option.selected = (name === currentLabel); // pre-select current label
+                 select.add(option);
+             });
+
+             //    onchange handler using anno.updateannotation  
+             select.onchange = () => {
+                 const selectedLabel = select.value; // The chosen class name or ""
+
+                 // 1. filter out existing label bodies we manage
+                 const otherBodies = annotation.body.filter(b => {
+                      const isTagging = b.purpose === 'tagging';
+                      const isOldValue = typeof b.value === 'string' && RELEVANT_CLASS_NAMES.includes(b.value);
+                      return !(isTagging || isOldValue);
+                 });
+
+                 // 2. prepare the new body array
+                 let newBodyArray = [...otherBodies];
+                 if (selectedLabel && RELEVANT_CLASS_NAMES.includes(selectedLabel)) {
+                     // add the new label body if a valid one was selected
+                     newBodyArray.push({
+                         type: 'TextualBody',
+                         purpose: 'tagging', 
+                         value: selectedLabel
+                     });
+                 }
+                 // if placeholder "" was selected, newbodyarray just contains otherbodies
+
+                 // 3. create the updated annotation data object for the update method
+                 const updatedAnnotationData = {
+                      "@context": annotation['@context'] || "http://www.w3.org/ns/anno.jsonld",
+                      type: annotation.type,
+                      id: annotation.id, 
+                      body: newBodyArray, 
+                      target: annotation.target
+                 };
+
+                 try {
+                    // 4. update the annotation with the new data (using updateselected)
+                    console.log("Updating annotation:", annotation.id, "with data:", updatedAnnotationData);
+                    anno.updateSelected(updatedAnnotationData); 
+                    
+                    // 5. update the visual sticky label
+                    updateStickyLabel(annotation, selectedLabel || null); // pass null if placeholder selected
+                  
+                  } catch(updateError) {
+                    console.error("Error updating annotation:", updateError);
+                  } finally {
+                    // 6. remove the dropdown
+                    removeDropdown();
+                  }
+             }; 
+
+             imageWrapper.appendChild(select);
+             select.focus();
+         } 
+
+       
+         function updateStickyLabel(annotation, label) {
+             if (!annotation || !imageWrapper) return;
+
+             // remove existing label div for this annotation
+             const existingLabel = imageWrapper.querySelector(`.annotation-label[data-anno-id="${annotation.id}"]`);
+             if (existingLabel) {
+                 existingLabel.remove();
+             }
+
+             // add new label div if a valid label is provided
+             if (label && RELEVANT_CLASS_NAMES.includes(label)) {
+                 const bbox = getPixelBBox(annotation);
+                 if (!bbox) return; // Need bbox to position
+
+                 const div = document.createElement('div');
+                 div.className = 'annotation-label';
+                 div.dataset.annoId = annotation.id; 
+                 div.textContent = label;
+                 div.style.left = bbox.x + 'px';
+                 div.style.top = bbox.y + 'px'; 
+                 imageWrapper.appendChild(div);
+             }
+         }
+
+
+        function initializeAnnotorious() {
+            if (!overlayImage) { console.error("Overlay image element not found."); return; }
+            if (!overlayImage.complete || overlayImage.naturalWidth === 0) { console.warn("Overlay image not loaded yet."); return; }
+            if (typeof Annotorious === 'undefined') { console.error("Annotorious core failed."); return; }
+
+            if (anno) { try { anno.destroy(); } catch(e){} anno = null; }
+
+            console.log('Initializing Annotorious (@recogito)...');
+            try {
+                anno = Annotorious.init({ image: overlayImage });
+
+                if (typeof Annotorious.SelectorPack === 'undefined') throw new Error("SelectorPack script failed.");
+                Annotorious.SelectorPack(anno, { tools: ['rect'] }); 
+                anno.setDrawingTool('rect');
+
+                console.log("Annotorious initialized successfully.");
+
+                anno.on('createAnnotation', annotation => {
+                    console.log('createAnnotation:', annotation);
+                    showLabelDropdown(annotation); 
+                });
+
+                anno.on('selectAnnotation', annotation => {
+                    console.log('selectAnnotation:', annotation);
+                    if (!annotation.isSelection) {
+                       showLabelDropdown(annotation); 
+                    }
+                });
+
+                 anno.on('cancelSelected', (selection) => {
+                    console.log('cancelSelected');
+                     removeDropdown(); 
+                 });
+
+                 anno.on('updateAnnotation', (annotation, previous) => {
+                      console.log('updateAnnotation:', annotation);
+                      const currentLabel = getCurrentLabel(annotation);
+                      updateStickyLabel(annotation, currentLabel); 
+                      removeDropdown();
+                 });
+
+                 anno.on('deleteAnnotation', annotation => {
+                      console.log('deleteAnnotation:', annotation);
+                      const labelDiv = imageWrapper?.querySelector(`.annotation-label[data-anno-id="${annotation.id}"]`);
+                      if (labelDiv) labelDiv.remove();
+                      removeDropdown(); 
+                 });
+
+                loadInitialAnnotations(anno, overlayImage);
+
+                 anno.getAnnotations().forEach(annotation => {
+                     const label = getCurrentLabel(annotation);
+                     if(label) {
+                        updateStickyLabel(annotation, label);
+                     }
+                 });
+
+                if (saveButton) {
+                    saveButton.disabled = false;
+                    saveButton.addEventListener('click', () => handleSaveCorrections(anno));
+                }
+                if (saveStatus) saveStatus.textContent = "Ready";
+
+            } catch (error) {
+                console.error("Error during Annotorious initialization/setup:", error);
+                if (saveStatus) saveStatus.textContent = "Error loading annotation tools.";
+                if (saveButton) saveButton.disabled = true;
+            }
+        } 
+
+    
+        function loadInitialAnnotations(annoInstance, imageElement) {
+             if (!annoInstance) { console.error("Annotorious instance not available."); return; }
+             if (!initialBoxes || !Array.isArray(initialBoxes) || initialBoxes.length === 0) { console.log("No initial boxes."); return; }
+             if (!imageElement.naturalWidth || !imageElement.naturalHeight) { console.warn("Image dimensions needed."); return; }
+             console.log(`Loading ${initialBoxes.length} initial boxes.`);
+             const annotations = initialBoxes.map((box, index) => {
+                 if (!Array.isArray(box) || box.length !== 4 || box.some(isNaN)) { console.warn(`Skipping invalid box ${index}`); return null; }
+                 const [x, y, w, h] = box.map(Math.round);
+                 const fragmentSelector = `xywh=pixel:${x},${y},${w},${h}`;
+                
+                 return { "@context": "http://www.w3.org/ns/anno.jsonld", "type": "Annotation", "body": [], "target": { "source": imageElement.src, "selector": { "type": "FragmentSelector", "conformsTo": "http://www.w3.org/TR/media-frags/", "value": fragmentSelector }}, "id": `#initial-${index}` };
+            }).filter(Boolean); 
+            try {
+                annoInstance.setAnnotations(annotations);
+                console.log("Initial annotations loaded.");
+            } catch (error) {
+                console.error("Error setting initial annotations:", error);
+                if(saveStatus) saveStatus.textContent="Error loading initial boxes.";
+            }
+        }
+
+
+        async function handleSaveCorrections(annoInstance) {
+            if (!annoInstance) { if(saveStatus) saveStatus.textContent = "Annotation tool not ready."; return; }
+            if (!saveButton || !saveStatus) { console.error("Save button/status missing."); return; }
+
+            removeDropdown(); 
+
+            saveButton.disabled = true; saveButton.textContent = "Saving...";
+            saveStatus.textContent = "Processing annotations..."; saveStatus.style.color = 'inherit';
+
+            const currentAnnotations = annoInstance.getAnnotations();
+            console.log("Annotations on Save:", currentAnnotations);
+
+            const correctedAnnotations = currentAnnotations.map((annotation, index) => {
+                let box = null;
+                let label = null;
+
+                try {
+                    box = getPixelBBox(annotation);
+                    if (!box) { console.warn(`Annotation ${index} (${annotation.id}) invalid geometry. Skipping.`); return null; }
+
+                    label = getCurrentLabel(annotation);
+                    if (!label) {
+                         console.warn(`Annotation ${index} (${annotation.id}) has no label. Skipping.`);
+                         return null; 
+                    }
+                    if (!RELEVANT_CLASS_NAMES.includes(label)) {
+                         console.warn(`Annotation ${index} (${annotation.id}) has unrecognized label '${label}'. Skipping.`);
+                         return null;
+                    }
+
+                } catch (e) { console.error(`Error parsing annotation ${index} (${annotation.id}):`, e); return null; }
+
+                if (box && label) {
+                    return { box: [box.x, box.y, box.w, box.h], label: label };
+                } else {
+                    return null; 
+                }
+            }).filter(Boolean); 
+
+            console.log("Formatted corrected annotations for saving:", correctedAnnotations);
+
+            if (correctedAnnotations.length === 0) {
+                saveStatus.textContent = "No valid labeled annotations found to save.";
+                saveStatus.style.color = 'orange';
+                saveButton.disabled = false;
+                saveButton.textContent = "Save Labeled Corrections";
+                return; 
+            }
+
+            const payload = { request_id: requestId, corrected_annotations: correctedAnnotations };
+            try {
+                saveStatus.textContent = "Saving to server...";
+                const response = await fetch('/save_corrections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+
+                if (!response.ok) {
+                    let errorMsg = `HTTP error! Status: ${response.status}`;
+                    try { const errorData = await response.json(); errorMsg = errorData.error || errorData.details || JSON.stringify(errorData); } catch (e) {} // Ignore if response not JSON
+                    throw new Error(errorMsg);
+                }
+
+                const result = await response.json();
+                console.log("Save response:", result);
+                saveStatus.textContent = "Corrections saved successfully!";
+                saveStatus.style.color = 'green';
+                saveButton.textContent = "Saved!"; 
+
+            } catch (error) {
+                console.error('Error saving corrections:', error);
+                saveStatus.textContent = `Error: ${error.message}`;
+                saveStatus.style.color = 'red';
+                saveButton.textContent = "Save Labeled Corrections"; 
+            } finally {
+                setTimeout(() => {
+                    if (saveButton.textContent !== "Saved!") {
+                        saveButton.disabled = false;
+                        saveButton.textContent = "Save Labeled Corrections";
+                    }
+                }, 1500);
+            }
+        } 
+        async function handleAcceptPredictions() {
+            if (!acceptPredictionsButton || !acceptStatus) {
+                console.error("Accept predictions button/status element missing.");
+                return;
+            }
+
+            acceptPredictionsButton.disabled = true;
+            acceptPredictionsButton.textContent = "Accepting...";
+            acceptStatus.textContent = "Processing initial predictions...";
+            acceptStatus.style.color = 'inherit';
+
+            if (!initialBoxes || initialBoxes.length === 0) {
+                acceptStatus.textContent = "No initial predictions to accept.";
+                acceptStatus.style.color = 'orange';
+                acceptPredictionsButton.disabled = false; 
+                acceptPredictionsButton.textContent = "Accept Model Predictions";
+                console.warn("handleAcceptPredictions: No initialBoxes found or empty.");
+                return;
+            }
+
+            if (!classificationScores || classificationScores.length !== initialBoxes.length) {
+                acceptStatus.textContent = "Data mismatch: boxes and scores count differ.";
+                acceptStatus.style.color = 'red';
+                acceptPredictionsButton.disabled = false;
+                acceptPredictionsButton.textContent = "Accept Model Predictions";
+                console.error("handleAcceptPredictions: classificationScores missing or length mismatch with initialBoxes.");
+                return;
+            }
+
+            const payload = {
+                request_id: requestId,
+                initial_boxes: initialBoxes, 
+                classification_scores: classificationScores
+            };
+
+            console.log("Payload for accept predictions:", payload);
+
+            try {
+                acceptStatus.textContent = "Saving to server...";
+                const response = await fetch('/save_accepted_predictions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    let errorMsg = `HTTP error! Status: ${response.status}`;
+                    try {
+                        const errorData = await response.json();
+                        errorMsg = errorData.error || errorData.details || JSON.stringify(errorData);
+                    } catch (e) { }
+                    throw new Error(errorMsg);
+                }
+
+                const result = await response.json();
+                console.log("Accept predictions save response:", result);
+                acceptStatus.textContent = result.message || "Predictions accepted successfully!";
+                acceptStatus.style.color = 'green';
+                acceptPredictionsButton.textContent = "Accepted!";
+
+            } catch (error) {
+                console.error('Error accepting predictions:', error);
+                acceptStatus.textContent = `Error: ${error.message}`;
+                acceptStatus.style.color = 'red';
+                acceptPredictionsButton.disabled = false; 
+                acceptPredictionsButton.textContent = "Accept Model Predictions";
+            }
+        }
+
+        if (overlayImage) {
+             if (imageWrapper && getComputedStyle(imageWrapper).position === 'static') {
+                 imageWrapper.style.position = 'relative';
+             }
+             overlayImage.addEventListener('load', () => { console.log("Image loaded."); initializeAnnotorious(); });
+             overlayImage.addEventListener('error', () => { console.error("Failed to load image."); /* Update UI */ });
+             if (overlayImage.complete && overlayImage.naturalWidth > 0) {
+                 console.log("Image already complete.");
+                 initializeAnnotorious();
+             }
+        } else {
+            console.error("Overlay image element not found.");
+            if (saveStatus) saveStatus.textContent = "Error: Annotation image missing.";
+            if (saveButton) saveButton.disabled = true;
+        }
+        if (saveButton) { 
+            saveButton.disabled = true;
+            if(saveStatus) saveStatus.textContent = "Annotation tool loading...";
+        }
+
+        if (acceptPredictionsButton && acceptStatus) {
+            if (initialBoxes && initialBoxes.length > 0 &&
+                classificationScores && classificationScores.length > 0 &&
+                initialBoxes.length === classificationScores.length) {
+                acceptPredictionsButton.disabled = false;
+                acceptStatus.textContent = "Ready to accept.";
+            } else {
+                acceptPredictionsButton.disabled = true;
+                if (initialBoxes && initialBoxes.length === 0) {
+                     acceptStatus.textContent = "No initial predictions to accept.";
+                } else if (!classificationScores || classificationScores.length !== (initialBoxes ? initialBoxes.length : 0) ){
+                     acceptStatus.textContent = "Prediction score data missing or mismatched.";
+                } else {
+                     acceptStatus.textContent = "Prediction data unavailable.";
+                }
+            }
+            acceptPredictionsButton.addEventListener('click', handleAcceptPredictions);
+        }
+
+
+
+    </script>
+
+</body>
+</html>

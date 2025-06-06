@@ -1,0 +1,5 @@
+google-cloud-storage
+pandas
+numpy
+opencv-python-headless
+Pillow

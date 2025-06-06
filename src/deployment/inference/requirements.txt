@@ -1,0 +1,9 @@
+Flask
+gunicorn
+google-cloud-storage
+tensorflow
+Pillow
+numpy
+SimpleITK
+scikit-image
+opencv-python-headless

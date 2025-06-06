@@ -1,0 +1,7 @@
+FROM us-docker.pkg.dev/deeplearning-platform-release/gcr.io/tf2-cu123.2-17.py310
+
+WORKDIR /app
+
+COPY src/evaluation/evaluate_models.py ./evaluate_models.py
+
+ENTRYPOINT ["python", "evaluate_models.py"]
